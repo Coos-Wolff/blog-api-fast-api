@@ -29,3 +29,10 @@ class PostResponse(BaseModel):
     body: str
     img_url: str
     author: AuthorResponse
+
+class PostListResponse(BaseModel):
+    items: list[PostResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
