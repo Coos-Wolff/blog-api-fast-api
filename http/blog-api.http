@@ -1,0 +1,696 @@
+# Blog API — full endpoint/status-code coverage for the JetBrains HTTP Client.
+#
+# Environment: select "local" (http-client.env.json) before running. To add another
+# environment (e.g. "staging"), add a sibling key to http-client.env.json with the
+# same variable names (baseUrl, testEmailPrefix, testPassword, nonExistentId) — every
+# request below reads only {{...}} variables, never a hardcoded host.
+#
+# Standalone execution: every request that needs prior state (a token, an existing
+# post, a duplicate to collide with) references a named "# @name" request's response
+# via {{name.response.body.$.field}}. The JetBrains client auto-runs a referenced
+# request first if it hasn't run yet in the session, so any single request in this
+# file can be executed alone, in isolation, in any order.
+#
+# Some "setup"/"seed" requests exist purely to guarantee prior state (e.g. an account
+# or a post already exists) and are re-run idempotently — on a fresh DB they succeed,
+# on a re-run against a warm DB they may themselves 409, which is fine since we don't
+# assert on them. A few requests reference a seed's response in a throwaway
+# "X-Chain-After" header purely to force execution order, without letting a possibly
+# absent field corrupt the actual request body — look for the comment explaining it.
+
+# ============================================================================
+# AUTH — POST /auth/register
+# ============================================================================
+
+# @name register-success
+# Expect: 201 Created
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{testEmailPrefix}}+register-success-{{$uuid}}@example.com",
+  "name": "Register Success",
+  "password": "{{testPassword}}"
+}
+
+> {%
+client.test("register success -> 201", function() {
+    client.assert(response.status === 201, "Expected 201, got " + response.status);
+    client.assert(response.body.email !== undefined, "Expected email in response body");
+    client.assert(response.body.password === undefined, "Password must never be echoed back");
+});
+%}
+
+###
+
+# @name register-duplicate-seed
+# Setup only — ensures this email already exists. Not asserted (may itself 409 on reruns).
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{testEmailPrefix}}+duplicate@example.com",
+  "name": "Duplicate Seed",
+  "password": "{{testPassword}}"
+}
+
+###
+
+# Expect: 409 Conflict — email already registered
+# X-Chain-After forces register-duplicate-seed to run first; the real email below is
+# a fixed literal so it's unaffected even if the seed's response has no "id" field.
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+X-Chain-After: {{register-duplicate-seed.response.body.$.id}}
+
+{
+  "email": "{{testEmailPrefix}}+duplicate@example.com",
+  "name": "Duplicate Seed",
+  "password": "{{testPassword}}"
+}
+
+> {%
+client.test("register duplicate email -> 409", function() {
+    client.assert(response.status === 409, "Expected 409, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 422 Unprocessable Entity — missing "name" + invalid email format
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "not-an-email",
+  "password": "{{testPassword}}"
+}
+
+> {%
+client.test("register invalid/missing fields -> 422", function() {
+    client.assert(response.status === 422, "Expected 422, got " + response.status);
+});
+%}
+
+# ============================================================================
+# AUTH — POST /auth/login
+# ============================================================================
+
+# @name register-owner
+# Setup only — the reusable "owner" role account used throughout this file.
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{testEmailPrefix}}+owner@example.com",
+  "name": "Post Owner",
+  "password": "{{testPassword}}"
+}
+
+###
+
+# @name login-owner
+# Expect: 200 OK — returns access_token + refresh_token.
+# Also serves as the reusable owner-session dependency for later requests.
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{register-owner.response.body.$.email}}",
+  "password": "{{testPassword}}"
+}
+
+> {%
+client.test("login success -> 200", function() {
+    client.assert(response.status === 200, "Expected 200, got " + response.status);
+    client.assert(response.body.access_token !== undefined, "Expected access_token");
+    client.assert(response.body.refresh_token !== undefined, "Expected refresh_token");
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — correct email, wrong password. Body must match the
+# nonexistent-email case exactly (vague, non-enumerating message).
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{register-owner.response.body.$.email}}",
+  "password": "definitely-the-wrong-password"
+}
+
+> {%
+client.test("login wrong password -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — email that has never been registered.
+# Uses a fresh random email so it can never collide with a real account.
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{testEmailPrefix}}+never-registered-{{$uuid}}@example.com",
+  "password": "whatever-password"
+}
+
+> {%
+client.test("login nonexistent email -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 422 Unprocessable Entity — missing password field
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{testEmailPrefix}}+owner@example.com"
+}
+
+> {%
+client.test("login missing fields -> 422", function() {
+    client.assert(response.status === 422, "Expected 422, got " + response.status);
+});
+%}
+
+# ============================================================================
+# AUTH — POST /auth/refresh
+# ============================================================================
+
+# Expect: 200 OK — valid refresh token returns a new access token.
+POST {{baseUrl}}/auth/refresh
+Authorization: Bearer {{login-owner.response.body.$.refresh_token}}
+
+> {%
+client.test("refresh with refresh token -> 200", function() {
+    client.assert(response.status === 200, "Expected 200, got " + response.status);
+    client.assert(response.body.access_token !== undefined, "Expected access_token");
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — an access token used where a refresh token is required
+# (token type check fails; Authorization header IS present so this bypasses the
+# HTTPBearer missing-header gotcha below).
+POST {{baseUrl}}/auth/refresh
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+
+> {%
+client.test("refresh with access token instead -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — no Authorization header at all.
+# Verified against FastAPI 0.139.0's HTTPBearer, which raises 401 "Not authenticated"
+# for a missing header (older FastAPI versions defaulted to 403 here — re-verify if
+# the fastapi dependency is downgraded).
+POST {{baseUrl}}/auth/refresh
+
+> {%
+client.test("refresh missing token -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — malformed/garbage token (Authorization header present,
+# so this goes through our own decode logic, not HTTPBearer's own gotcha).
+POST {{baseUrl}}/auth/refresh
+Authorization: Bearer this.is.not-a-valid-jwt
+
+> {%
+client.test("refresh invalid token -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+# ============================================================================
+# POST — GET /post/
+# ============================================================================
+
+# Expect: 200 OK with pagination metadata. No setup needed — metadata fields are
+# always present regardless of how many posts exist.
+GET {{baseUrl}}/post/?page=1&per_page=5
+
+> {%
+client.test("list posts -> 200 with pagination metadata", function() {
+    client.assert(response.status === 200, "Expected 200, got " + response.status);
+    client.assert(response.body.items !== undefined, "Expected items array");
+    client.assert(response.body.total !== undefined, "Expected total");
+    client.assert(response.body.page !== undefined, "Expected page");
+    client.assert(response.body.per_page !== undefined, "Expected per_page");
+    client.assert(response.body.total_pages !== undefined, "Expected total_pages");
+});
+%}
+
+# ============================================================================
+# POST — GET /post/{id}
+# ============================================================================
+
+# @name create-post-for-get
+# Setup only — a post to fetch by id.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Get-By-Id Fixture {{$uuid}}",
+  "subtitle": "Fixture for GET /post/{id} 200 test",
+  "date": "2026-01-15",
+  "body": "Fixture body content.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# Expect: 200 OK — existing post
+GET {{baseUrl}}/post/{{create-post-for-get.response.body.$.id}}
+
+> {%
+client.test("get post by id -> 200", function() {
+    client.assert(response.status === 200, "Expected 200, got " + response.status);
+    client.assert(response.body.id !== undefined, "Expected id");
+    client.assert(response.body.author !== undefined, "Expected nested author");
+});
+%}
+
+###
+
+# Expect: 404 Not Found — id that (almost certainly) doesn't exist
+GET {{baseUrl}}/post/{{nonExistentId}}
+
+> {%
+client.test("get post missing -> 404", function() {
+    client.assert(response.status === 404, "Expected 404, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 422 Unprocessable Entity — non-integer path param
+GET {{baseUrl}}/post/not-an-integer
+
+> {%
+client.test("get post invalid id -> 422", function() {
+    client.assert(response.status === 422, "Expected 422, got " + response.status);
+});
+%}
+
+# ============================================================================
+# POST — POST /post/add
+# ============================================================================
+
+# Expect: 201 Created — author id comes from the token, not the body
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Add Success {{$uuid}}",
+  "subtitle": "A new post",
+  "date": "2026-02-01",
+  "body": "Some body content.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+> {%
+client.test("add post success -> 201", function() {
+    client.assert(response.status === 201, "Expected 201, got " + response.status);
+    client.assert(response.body.author !== undefined, "Expected author to be populated from token");
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — no Authorization header (verified, see refresh section).
+POST {{baseUrl}}/post/add
+Content-Type: application/json
+
+{
+  "title": "Add No Token {{$uuid}}",
+  "subtitle": "Should never be created",
+  "date": "2026-02-01",
+  "body": "Some body content.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+> {%
+client.test("add post no token -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — refresh token used where an access token is required
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.refresh_token}}
+Content-Type: application/json
+
+{
+  "title": "Add Refresh Token {{$uuid}}",
+  "subtitle": "Should never be created",
+  "date": "2026-02-01",
+  "body": "Some body content.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+> {%
+client.test("add post with refresh token -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+###
+
+# @name add-post-duplicate-title-seed
+# Setup only — a post with a fixed title to collide with.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Add Route Duplicate Title",
+  "subtitle": "Seed post",
+  "date": "2026-02-02",
+  "body": "Seed body content.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# Expect: 409 Conflict — duplicate title.
+# X-Chain-After forces the seed to run first; the real title below is a fixed
+# literal so it's unaffected if the seed's response has no "id" field.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+X-Chain-After: {{add-post-duplicate-title-seed.response.body.$.id}}
+
+{
+  "title": "Add Route Duplicate Title",
+  "subtitle": "Different subtitle",
+  "date": "2026-02-03",
+  "body": "Different body.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+> {%
+client.test("add post duplicate title -> 409", function() {
+    client.assert(response.status === 409, "Expected 409, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 422 Unprocessable Entity — missing title + invalid date format.
+# Uses a VALID token so the failure is isolated to body validation, not auth.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "subtitle": "Missing title, bad date",
+  "date": "not-a-date",
+  "body": "Some body content.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+> {%
+client.test("add post invalid body -> 422", function() {
+    client.assert(response.status === 422, "Expected 422, got " + response.status);
+});
+%}
+
+# ============================================================================
+# POST — PATCH /post/{id}
+# ============================================================================
+
+# @name create-post-for-patch-owner
+# Setup only — a post the owner will patch.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Patch Owner Fixture {{$uuid}}",
+  "subtitle": "Before patch",
+  "date": "2026-03-01",
+  "body": "Before patch body.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# Expect: 200 OK — owner patches their own post
+PATCH {{baseUrl}}/post/{{create-post-for-patch-owner.response.body.$.id}}
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "subtitle": "After patch",
+  "body": "After patch body."
+}
+
+> {%
+client.test("patch post as owner -> 200", function() {
+    client.assert(response.status === 200, "Expected 200, got " + response.status);
+    client.assert(response.body.subtitle === "After patch", "Expected updated subtitle");
+});
+%}
+
+###
+
+# @name register-intruder
+# Setup only — a second, unrelated user account.
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{testEmailPrefix}}+intruder@example.com",
+  "name": "Intruder",
+  "password": "{{testPassword}}"
+}
+
+###
+
+# @name login-intruder
+# Setup only — session for the second user.
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{register-intruder.response.body.$.email}}",
+  "password": "{{testPassword}}"
+}
+
+###
+
+# @name create-post-for-patch-forbidden
+# Setup only — a post owned by "owner", targeted by "intruder".
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Patch Forbidden Fixture {{$uuid}}",
+  "subtitle": "Owned by owner",
+  "date": "2026-03-02",
+  "body": "Owned by owner body.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# Expect: 403 Forbidden — non-owner, non-admin user patching someone else's post
+PATCH {{baseUrl}}/post/{{create-post-for-patch-forbidden.response.body.$.id}}
+Authorization: Bearer {{login-intruder.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "subtitle": "Hijacked subtitle"
+}
+
+> {%
+client.test("patch post as non-owner -> 403", function() {
+    client.assert(response.status === 403, "Expected 403, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 404 Not Found — patching a post that doesn't exist
+PATCH {{baseUrl}}/post/{{nonExistentId}}
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "subtitle": "Doesn't matter"
+}
+
+> {%
+client.test("patch post missing -> 404", function() {
+    client.assert(response.status === 404, "Expected 404, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — no Authorization header (verified, see refresh section).
+PATCH {{baseUrl}}/post/{{nonExistentId}}
+Content-Type: application/json
+
+{
+  "subtitle": "Doesn't matter"
+}
+
+> {%
+client.test("patch post no token -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
+
+###
+
+# @name create-post-A-fixed-title
+# Setup only — a post holding the title that will be collided with.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Patch Duplicate Title Seed",
+  "subtitle": "Post A",
+  "date": "2026-03-03",
+  "body": "Post A body.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# @name create-post-B-for-duplicate-patch
+# Setup only — a second, distinct post that will be patched to collide with A's title.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Patch Duplicate Title Target {{$uuid}}",
+  "subtitle": "Post B",
+  "date": "2026-03-04",
+  "body": "Post B body.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# Expect: 409 Conflict — patching post B's title to post A's existing title.
+# X-Chain-After forces create-post-A-fixed-title to run first; the real title below
+# is a fixed literal so it's unaffected if that seed's response has no "id" field.
+PATCH {{baseUrl}}/post/{{create-post-B-for-duplicate-patch.response.body.$.id}}
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+X-Chain-After: {{create-post-A-fixed-title.response.body.$.id}}
+
+{
+  "title": "Patch Duplicate Title Seed"
+}
+
+> {%
+client.test("patch post duplicate title -> 409", function() {
+    client.assert(response.status === 409, "Expected 409, got " + response.status);
+});
+%}
+
+# ============================================================================
+# POST — DELETE /post/{id}
+# ============================================================================
+
+# @name create-post-for-delete-owner
+# Setup only — a post the owner will delete.
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Delete Owner Fixture {{$uuid}}",
+  "subtitle": "To be deleted",
+  "date": "2026-04-01",
+  "body": "To be deleted body.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# Expect: 204 No Content — owner deletes their own post
+DELETE {{baseUrl}}/post/{{create-post-for-delete-owner.response.body.$.id}}
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+
+> {%
+client.test("delete post as owner -> 204", function() {
+    client.assert(response.status === 204, "Expected 204, got " + response.status);
+});
+%}
+
+###
+
+# @name create-post-for-delete-forbidden
+# Setup only — a post owned by "owner", targeted by "intruder".
+POST {{baseUrl}}/post/add
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+Content-Type: application/json
+
+{
+  "title": "Delete Forbidden Fixture {{$uuid}}",
+  "subtitle": "Owned by owner",
+  "date": "2026-04-02",
+  "body": "Owned by owner body.",
+  "img_url": "https://example.com/img.jpg"
+}
+
+###
+
+# Expect: 403 Forbidden — non-owner, non-admin user deleting someone else's post
+DELETE {{baseUrl}}/post/{{create-post-for-delete-forbidden.response.body.$.id}}
+Authorization: Bearer {{login-intruder.response.body.$.access_token}}
+
+> {%
+client.test("delete post as non-owner -> 403", function() {
+    client.assert(response.status === 403, "Expected 403, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 404 Not Found — deleting a post that doesn't exist
+DELETE {{baseUrl}}/post/{{nonExistentId}}
+Authorization: Bearer {{login-owner.response.body.$.access_token}}
+
+> {%
+client.test("delete post missing -> 404", function() {
+    client.assert(response.status === 404, "Expected 404, got " + response.status);
+});
+%}
+
+###
+
+# Expect: 401 Unauthorized — no Authorization header (verified, see refresh section).
+DELETE {{baseUrl}}/post/{{nonExistentId}}
+
+> {%
+client.test("delete post no token -> 401", function() {
+    client.assert(response.status === 401, "Expected 401, got " + response.status);
+});
+%}
