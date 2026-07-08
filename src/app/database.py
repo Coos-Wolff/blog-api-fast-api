@@ -1,3 +1,6 @@
+from typing import Annotated
+
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from app.base import Base
@@ -18,3 +21,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+SessionDependency = Annotated[AsyncSession, Depends(get_db)]
