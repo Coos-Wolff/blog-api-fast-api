@@ -1,17 +1,17 @@
-from datetime import date
+import datetime
 from pydantic import BaseModel, ConfigDict
 
 class PostCreate(BaseModel):
     title: str
     subtitle: str
-    date: date
+    date: datetime.date
     body: str
     img_url: str
 
 class PostUpdate(BaseModel):
     title: str | None = None
     subtitle: str | None = None
-    date: date | None = None
+    date: datetime.date | None = None
     body: str | None = None
     img_url: str | None = None
 
@@ -25,7 +25,7 @@ class PostResponse(BaseModel):
     id: int
     title: str
     subtitle: str
-    date: date
+    date: datetime.date
     body: str
     img_url: str
     author: AuthorResponse
