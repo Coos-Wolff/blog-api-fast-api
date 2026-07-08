@@ -1,12 +1,17 @@
 import math
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from app import repository
-from app.exceptions import NotFoundError, UnauthorizedError, ForbiddenError, PostTitleAlreadyExistsError
-from app.models import BlogPost
+
+from app import repository, security
+from app.exceptions import NotFoundError, UnauthorizedError, ForbiddenError, PostTitleAlreadyExistsError, \
+    EmailAlreadyExistsError, InvalidCredentialsError
+from app.models import BlogPost, User
 from app.schemas.post import PostListResponse, PostResponse, PostCreate, PostUpdate
+from app.schemas.auth import TokenResponse, AccessTokenResponse
+from app.schemas.user import UserCreate, UserResponse, UserLogin
 
-
+DUMMY_HASH = security.hash_password("Very.Long.Dummy.Hash.14232!")
+INVALID_LOGIN_MESSAGE = "Invalid email or password"
 async def get_all_posts(session: AsyncSession, page: int, per_page: int) -> PostListResponse:
     posts, total = await repository.get_all_posts(session=session, per_page=per_page, page=page)
     total_pages = math.ceil(total / per_page) if per_page else 0
@@ -54,3 +59,36 @@ async def update_post(session: AsyncSession, post_id: int, current_user_id: int,
 async def delete_post(session: AsyncSession, post_id: int, current_user_id: int):
     await require_ownership(session=session, post_id=post_id, current_user_id=current_user_id)
     await repository.delete_post(session=session, post_id=post_id)
+
+async def register_user(session: AsyncSession, data: UserCreate) -> UserResponse:
+    email = data.email
+    user = await repository.find_user_by_email(session=session, email=email)
+    if user:
+        raise EmailAlreadyExistsError("Email already exists")
+
+    hashed_password = security.hash_password(password=data.password)
+    new_user = User(
+        email=email,
+        name=data.name,
+        password=hashed_password
+    )
+    registered_user = await repository.add_user(session=session, user=new_user)
+    return UserResponse.model_validate(registered_user)
+
+async def login(session: AsyncSession, data: UserLogin) -> TokenResponse:
+    user = await repository.find_user_by_email(session=session, email=data.email)
+    if user is None:
+        _ = security.verify_password(password=data.password, hashed=DUMMY_HASH)
+        raise InvalidCredentialsError(INVALID_LOGIN_MESSAGE)
+    is_valid = security.verify_password(password=data.password, hashed=user.password)
+    if not is_valid:
+        raise InvalidCredentialsError(INVALID_LOGIN_MESSAGE)
+
+    tokens = {
+        "access_token":security.create_access_token(user_id=user.id),
+        "refresh_token":security.create_refresh_token(user_id=user.id)
+    }
+    return TokenResponse(access_token=tokens["access_token"], refresh_token=tokens["refresh_token"])
+
+async def refresh_access_token(user_id: int) -> AccessTokenResponse:
+    return AccessTokenResponse(access_token=security.create_access_token(user_id=user_id))
