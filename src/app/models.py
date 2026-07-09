@@ -1,8 +1,10 @@
 import datetime
 
-from app.base import Base
-from sqlalchemy import Integer, String, Text, ForeignKey, Boolean, Date
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.base import Base
+
 
 class BlogPost(Base):
     __tablename__ = "blog_post"

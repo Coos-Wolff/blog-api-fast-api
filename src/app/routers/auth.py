@@ -3,8 +3,8 @@ from fastapi import APIRouter
 from app import service
 from app.auth import RefreshUserDependency
 from app.database import SessionDependency
-from app.schemas.auth import TokenResponse, AccessTokenResponse
-from app.schemas.user import UserLogin, UserResponse, UserCreate
+from app.schemas.auth import AccessTokenResponse, TokenResponse
+from app.schemas.user import UserCreate, UserLogin, UserResponse
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 

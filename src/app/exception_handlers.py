@@ -1,6 +1,15 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from app.exceptions import NotFoundError, ForbiddenError, EmailAlreadyExistsError, InvalidCredentialsError, PostTitleAlreadyExistsError, UnauthorizedError
+
+from app.exceptions import (
+    EmailAlreadyExistsError,
+    ForbiddenError,
+    InvalidCredentialsError,
+    NotFoundError,
+    PostTitleAlreadyExistsError,
+    UnauthorizedError,
+)
+
 
 def register_exception_handlers(app: FastAPI):
     @app.exception_handler(NotFoundError)

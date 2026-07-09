@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from app import service
 from app.auth import CurrentUserDependency
 from app.database import SessionDependency
-from app.schemas.post import PostResponse, PostListResponse, PostCreate, PostUpdate
+from app.schemas.post import PostCreate, PostListResponse, PostResponse, PostUpdate
 
 post_router = APIRouter(prefix="/post", tags=["posts"])
 

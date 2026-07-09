@@ -1,8 +1,9 @@
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import BlogPost, User
+
 
 async def find_user_by_email(session: AsyncSession, email: str):
     result = await session.execute(select(User).where(User.email == email))

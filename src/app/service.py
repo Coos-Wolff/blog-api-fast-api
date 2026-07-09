@@ -3,12 +3,18 @@ import math
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repository, security
-from app.exceptions import NotFoundError, UnauthorizedError, ForbiddenError, PostTitleAlreadyExistsError, \
-    EmailAlreadyExistsError, InvalidCredentialsError
+from app.exceptions import (
+    EmailAlreadyExistsError,
+    ForbiddenError,
+    InvalidCredentialsError,
+    NotFoundError,
+    PostTitleAlreadyExistsError,
+    UnauthorizedError,
+)
 from app.models import BlogPost, User
-from app.schemas.post import PostListResponse, PostResponse, PostCreate, PostUpdate
-from app.schemas.auth import TokenResponse, AccessTokenResponse
-from app.schemas.user import UserCreate, UserResponse, UserLogin
+from app.schemas.auth import AccessTokenResponse, TokenResponse
+from app.schemas.post import PostCreate, PostListResponse, PostResponse, PostUpdate
+from app.schemas.user import UserCreate, UserLogin, UserResponse
 
 DUMMY_HASH = security.hash_password("Very.Long.Dummy.Hash.14232!")
 INVALID_LOGIN_MESSAGE = "Invalid email or password"

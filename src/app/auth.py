@@ -1,9 +1,8 @@
 from typing import Annotated
 
 import jwt
-
 from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import security
 
