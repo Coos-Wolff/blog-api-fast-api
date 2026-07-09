@@ -1,8 +1,9 @@
 import random
+from datetime import datetime, timedelta, timezone
+
 import jwt
 import pytest
 
-from datetime import timedelta, datetime, timezone
 from app import security
 from app.config import settings
 

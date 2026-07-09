@@ -1,10 +1,13 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from app import models  # noqa: F401 - ensures tables are registered
 from app.database import init_db
-from app import models # noqa: F401 - ensures tables are registered
 from app.exception_handlers import register_exception_handlers
-from app.routers.post import post_router
 from app.routers.auth import auth_router
+from app.routers.post import post_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

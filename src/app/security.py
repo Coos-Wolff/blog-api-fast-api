@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
 import bcrypt
 import jwt
 
-from datetime import datetime, timedelta, timezone
 from app.config import settings
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()

@@ -1,5 +1,7 @@
 import datetime
+
 from pydantic import BaseModel, ConfigDict
+
 
 class PostCreate(BaseModel):
     title: str
