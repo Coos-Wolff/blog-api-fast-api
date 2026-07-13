@@ -1,0 +1,37 @@
+# Keep the build context small and prevent secrets/local cruft from leaking
+# into the image. Anything matched here is never sent to the Docker daemon.
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtualenvs - the image builds its own via uv
+.venv/
+venv/
+
+# Secrets & local env (Dockerfile/compose inject env vars explicitly)
+.env
+
+# Local SQLite databases from dev/testing
+*.db
+*.sqlite
+*.sqlite3
+
+# Git & CI
+.git/
+.github/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Docs & infra not needed at runtime
+README.md
+CLAUDE.md
+k8s/
