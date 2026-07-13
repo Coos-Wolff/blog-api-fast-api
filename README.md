@@ -1,11 +1,11 @@
 # Blog API (FastAPI)
 
-An async RESTful blog post API built with FastAPI, SQLAlchemy 2.x (async), and SQLite, with JWT authentication (access + refresh tokens) and author/admin ownership rules. This is a port of an equivalent Flask API, rebuilt on FastAPI's async stack.
+An async RESTful blog post API built with FastAPI, SQLAlchemy 2.x (async), and PostgreSQL (async via asyncpg), with JWT authentication (access + refresh tokens) and author/admin ownership rules. This is a port of an equivalent Flask API, rebuilt on FastAPI's async stack.
 
 ## Stack
 
 - **FastAPI** — async web framework
-- **SQLAlchemy 2.x (async)** — ORM, via `aiosqlite` for async SQLite
+- **SQLAlchemy 2.x (async)** — ORM, via `asyncpg` for async PostgreSQL
 - **Pydantic v2** — request/response schemas and validation
 - **PyJWT** — JWT creation/verification
 - **bcrypt** — password hashing
@@ -35,13 +35,29 @@ cp .env.example .env
 
 Set the values in `.env`:
 
-- `DATABASE_URL` — async SQLite URL, e.g. `sqlite+aiosqlite:///./blog.db`
+- `DATABASE_URL` — async Postgres URL, e.g. `postgresql+asyncpg://blog:blog@localhost:5432/blogdb`
 - `JWT_SECRET_KEY` — signing key for JWTs (generate with `python -c "import secrets; print(secrets.token_hex(32))"`)
 - `APP_ENV`, `DEBUG` — environment name and debug flag
 
 Optional (have defaults): `JWT_ALGORITHM` (HS256), `ACCESS_TOKEN_EXPIRE_MINUTES` (15), `REFRESH_TOKEN_EXPIRE_DAYS` (30).
 
-### 4. Run
+### 4. Start Postgres
+
+```bash
+docker compose up -d
+```
+
+Starts the Postgres container defined in `docker-compose.yaml`.
+
+### 5. Apply database migrations
+
+```bash
+uv run alembic upgrade head
+```
+
+Creates the schema. The app does not create tables on startup.
+
+### 6. Run
 
 ```bash
 uv run uvicorn app.main:app --reload --port 5003
@@ -124,10 +140,10 @@ Domain errors return `{"error": "message"}` with an appropriate status. FastAPI 
 
 ```
 src/app/
-├── main.py            # FastAPI app, lifespan (table creation), router + handler registration
+├── main.py            # FastAPI app, lifespan, router + handler registration
 ├── config.py          # pydantic-settings Settings, loaded from .env
 ├── base.py            # SQLAlchemy DeclarativeBase (foundation, imports nothing of app)
-├── database.py        # async engine, session factory, get_db dependency, init_db, SessionDependency
+├── database.py        # async engine, session factory, get_db dependency, SessionDependency
 ├── models.py          # SQLAlchemy models (User, BlogPost)
 ├── security.py        # auth primitives: hash/verify password, create/decode JWT
 ├── auth.py            # token-type dependency factory + CurrentUserDependency / RefreshUserDependency

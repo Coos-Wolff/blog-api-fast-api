@@ -1,12 +1,14 @@
 # Blog API (FastAPI)
 
-Async JSON REST API for a blog. Port of a Flask version onto FastAPI + async SQLAlchemy. No HTML/templates — every response is JSON. Python 3.14 on Windows, SQLite via aiosqlite.
+Async JSON REST API for a blog. Port of a Flask version onto FastAPI + async SQLAlchemy. No HTML/templates — every response is JSON. Python 3.14 on Windows, PostgreSQL via asyncpg.
 
 ## Commands
 - Dependencies via **uv** (`pyproject.toml` + `uv.lock`). Never bare pip.
 - Setup/reproduce: `uv sync`
 - Add dependency: `uv add <pkg>` (runtime) / `uv add --dev <pkg>` (dev)
 - Run: `uv run uvicorn app.main:app --reload --port 5003` (docs at `/docs`)
+- Start Postgres: `docker compose up -d` (runs the Postgres container defined in `docker-compose.yaml`)
+- Migrations: `uv run alembic revision --autogenerate -m "<message>"` (create a migration) / `uv run alembic upgrade head` (apply migrations)
 - Commit `pyproject.toml` and `uv.lock`; never commit `.venv/`, `.env`, or `blog.db`.
 - `src` layout + hatchling: the package is importable because it's installed (via `uv sync`); `import app...` resolves from the installed package, not the cwd.
 
@@ -15,7 +17,7 @@ Layered: **router → service → repository**. Session injected top-down.
 - **Routers** (`routers/*.py`, one `APIRouter` each, included in `main.py`) translate HTTP only: typed params (path/query/body), dependency injection, call service, return. `response_model` handles serialization. No business logic, no DB access.
 - **Services** (`service.py`) own business logic; `async`; take `session` as first param; raise domain exceptions; build and return typed Pydantic response objects (e.g. `PostResponse.model_validate(obj)`). NEVER import `HTTPException`/`fastapi` — services are HTTP-agnostic.
 - **Repositories** (`repository.py`) own all async DB access; `async`; take `session` as first param.
-- Import hierarchy is one-directional toward `base.py`: `base` (defines `Base`, imports nothing of app) ← `models`/`database` ← everything else. Do NOT make `base.py` import from the app package. `main.py` imports `models` (`# noqa: F401`) so `create_all` sees the tables.
+- Import hierarchy is one-directional toward `base.py`: `base` (defines `Base`, imports nothing of app) ← `models`/`database` ← everything else. Do NOT make `base.py` import from the app package. `main.py` imports `models` (`# noqa: F401`) so its SQLAlchemy mappings (e.g. relationships) are registered; `alembic/env.py` imports `models` separately so autogenerate sees the tables.
 
 ## Async rules (the recurring bite)
 - Every call to an `async def` MUST be `await`ed — including service→repository and internal repository calls.
@@ -34,9 +36,9 @@ Layered: **router → service → repository**. Session injected top-down.
 - **Login anti-enumeration**: unknown-email and wrong-password return the identical vague 401. A `DUMMY_HASH` verify runs on the user-missing path to equalize timing. Do NOT remove it or make the messages distinct.
 - **DI style**: use `Annotated` aliases (`SessionDependency`, `CurrentUserDependency`, `RefreshUserDependency`) as param types, not repeated `= Depends(...)`. Aliases are `PascalCase` (they're types).
 - **Refactor duplication** the idiomatic way (dependency factory, shared helper, Annotated alias) rather than copy-paste — but don't over-abstract things that merely look similar and will diverge.
+- **Database**: Postgres (async via `asyncpg`); the app does not create its schema — Alembic migrations do. After changing a model, generate a migration (`uv run alembic revision --autogenerate -m "<message>"`) and review the generated file before applying it — autogenerate is not always complete.
 
 ## Known tech debt
-- `create_all()` on startup should become Alembic migrations eventually (SQLite schema changes currently need deleting `blog.db`).
 - Login timing equalized on the dominant hash path but not fully constant-time. Noted.
 - Pydantic 422 errors use `{"detail": ...}` while domain errors use `{"error": ...}` — minor shape inconsistency, not yet normalized.
 
